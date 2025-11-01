@@ -21,7 +21,7 @@ from audio_processor import AudioProcessor
 import threading
 import config
 from config import ELEVENLABS_VOICE_ID
-from realtime_streaming import stream_generate_and_speak
+from stats_tracker import update_stats, reset_stats
 
 # Initialize
 character = AICharacter()
@@ -144,6 +144,15 @@ def main():
     else:
         print("✅ BlackHole detected!\n")
     
+    # Get Space link for API
+    space_link = input("\n🔗 Twitter Space link (optional, for API): ").strip()
+    if not space_link:
+        space_link = "Not provided"
+    
+    # Initialize stats
+    update_stats(space_link=space_link, status="online", argument_count=0)
+    print("✅ Stats API updated!\n")
+    
     input("👉 Press Enter when you're UNMUTED in the Space and ready...")
     
     print("\n" + "="*70)
@@ -158,7 +167,8 @@ def main():
     argument_count = 0
     ramble_count = 0
     last_activity_time = time.time()
-    silence_before_ramble = 30  # Ramble after 30 seconds of silence
+    last_response_time = time.time()  # Track when bot last spoke
+    silence_before_ramble = 45  # Ramble after 45 seconds of TRUE silence (no questions/responses)
     
     # Propaganda topics for rambling
     propaganda_topics = [
@@ -171,21 +181,26 @@ def main():
         "Our enemies conspire against us!"
     ]
     
-    # Use regular Mac microphone (not BlackHole) to avoid feedback
+    # Use BlackHole aggregate to hear Space directly (no speakers needed!)
     mic_list = sr.Microphone.list_microphone_names()
     mic_index = None
     
-    # Find built-in microphone
+    # Find BlackHole aggregate device
     for i, name in enumerate(mic_list):
-        if "macbook" in name.lower() and "microfono" in name.lower():
+        if "blackhole" in name.lower() and name.lower() != "blackhole 2ch":
             mic_index = i
-            print(f"✅ Using microphone: {name} (index {i})")
-            print("   This will hear Space from your speakers\n")
+            print(f"✅ Using audio device: {name} (index {i})")
+            print("   Bot will hear Space directly through BlackHole!\n")
             break
     
     if mic_index is None:
-        # Use default
-        print("✅ Using default microphone\n")
+        # Fallback to regular mic
+        for i, name in enumerate(mic_list):
+            if "macbook" in name.lower() and "microfono" in name.lower():
+                mic_index = i
+                print(f"✅ Using microphone: {name} (index {i})")
+                print("   ⚠️ Make sure Space plays through SPEAKERS (not headphones)!\n")
+                break
     
     try:
         while True:
@@ -194,8 +209,12 @@ def main():
                 time.sleep(0.2)
                 continue
             
-            # Check if should ramble (no activity for X seconds)
-            if time.time() - last_activity_time > silence_before_ramble:
+            # Check if should ramble (TRUE silence - no questions AND no responses for X seconds)
+            time_since_activity = time.time() - last_activity_time
+            time_since_response = time.time() - last_response_time
+            
+            # Only ramble if BOTH no questions AND bot hasn't spoken recently
+            if time_since_activity > silence_before_ramble and time_since_response > silence_before_ramble:
                 print(f"\n💭 {silence_before_ramble}s of silence - Hitler giving propaganda speech...")
                 
                 import random
@@ -226,8 +245,10 @@ def main():
                 bot_is_speaking = False
                 ramble_count += 1
                 last_activity_time = time.time()
+                last_response_time = time.time()  # Reset both
                 
                 print(f"✅ Propaganda #{ramble_count} delivered\n")
+                print(f"⏰ Will ramble again if silence for {silence_before_ramble}s\n")
                 continue
             
             # Use regular microphone
@@ -383,6 +404,10 @@ def main():
                     bot_is_speaking = False
                     argument_count += 1
                     last_activity_time = time.time()
+                    last_response_time = time.time()  # Reset BOTH timers
+                    
+                    # Update stats API
+                    update_stats(argument_count=argument_count, last_response=response)
                     
                     print(f"✅ Argument #{argument_count} delivered!\n")
                     
@@ -398,6 +423,9 @@ def main():
                     time.sleep(0.5)
     
     except KeyboardInterrupt:
+        # Mark as offline
+        update_stats(status="offline")
+        
         print("\n\n" + "="*70)
         print("🛑 AUTONOMOUS MODE STOPPED")
         print("="*70)
