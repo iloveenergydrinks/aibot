@@ -160,18 +160,12 @@ class AudioProcessor:
             for chunk in audio_generator:
                 f.write(chunk)
         
-        # Slow down and boost volume for authoritative Hitler speech
+        # Just boost volume - no slowdown for faster speech
         try:
             audio = AudioSegment.from_file(temp_output)
             
-            # Slow down by 10% for more deliberate, commanding pace
-            slowed_audio = audio._spawn(audio.raw_data, overrides={
-                "frame_rate": int(audio.frame_rate * 0.90)  # 10% slower
-            })
-            slowed_audio = slowed_audio.set_frame_rate(audio.frame_rate)
-            
-            # Boost volume
-            boosted_audio = slowed_audio + 6
+            # Boost volume only
+            boosted_audio = audio + 6
             boosted_audio.export(output_path, format="mp3")
             
             import os
