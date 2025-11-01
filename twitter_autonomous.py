@@ -397,19 +397,103 @@ def main():
                     # Generate full audio (smooth, no gaps)
                     audio_file = audio_processor.text_to_speech(response)
                     
-                    print("🔊 Speaking...")
-                    subprocess.run(["afplay", audio_file])
+                    print("🔊 Speaking (monitoring for interrupts)...")
+                    
+                    # Play in background so we can detect interrupts
+                    play_process = subprocess.Popen(["afplay", audio_file],
+                                                   stdout=subprocess.DEVNULL,
+                                                   stderr=subprocess.DEVNULL)
+                    
+                    # Monitor for interruptions
+                    interrupt_detected = False
+                    interrupt_text = None
+                    start_speak = time.time()
+                    
+                    # Track what we're saying to filter out our own echo
+                    our_words = set(response.lower().split())
+                    
+                    interrupt_recognizer = sr.Recognizer()
+                    interrupt_recognizer.energy_threshold = 3500
+                    
+                    while play_process.poll() is None:
+                        # After 1s of speaking, start checking for interrupts
+                        if time.time() - start_speak > 1.0:
+                            try:
+                                with sr.Microphone(**mic_params) as int_source:
+                                    try:
+                                        # Quick listen
+                                        int_audio = interrupt_recognizer.listen(int_source, timeout=0.3, phrase_time_limit=2)
+                                        
+                                        # Try to transcribe
+                                        try:
+                                            int_text = recognizer.recognize_google(int_audio)
+                                            int_words = set(int_text.lower().split())
+                                            
+                                            # Check if it's different from what we're saying (not our echo)
+                                            overlap = len(our_words & int_words)
+                                            similarity = overlap / max(len(int_words), 1)
+                                            
+                                            # If less than 40% similarity = real interruption!
+                                            if similarity < 0.4 and len(int_text.split()) >= 2:
+                                                print(f"\n⚠️ INTERRUPTED! They said: \"{int_text}\"")
+                                                play_process.terminate()
+                                                interrupt_detected = True
+                                                interrupt_text = int_text
+                                                break
+                                        except:
+                                            pass
+                                    except sr.WaitTimeoutError:
+                                        pass
+                            except:
+                                pass
+                        
+                        time.sleep(0.15)
+                    
+                    play_process.wait()
                     os.remove(audio_file)
                     
                     bot_is_speaking = False
-                    argument_count += 1
+                    
+                    # Handle interruption
+                    if interrupt_detected and interrupt_text:
+                        print("😡 Hitler was interrupted! Responding angrily...")
+                        
+                        # Angry interruption responses
+                        import random
+                        angry_intros = [
+                            "Silence! Don't interrupt me when I'm speaking!",
+                            "How dare you interrupt the Führer!",
+                            "Dummkopf! I wasn't finished!",
+                            "Mein Gott! Let me finish!",
+                            "Scheiße! You dare cut me off?!"
+                        ]
+                        
+                        angry_intro = random.choice(angry_intros)
+                        
+                        # Now address what they said
+                        full_prompt = f"{angry_intro} You said: {interrupt_text}"
+                        interrupt_response = character.generate_response(full_prompt, "Interrupter")
+                        
+                        print(f"🎭 Hitler (angry): \"{interrupt_response}\"")
+                        
+                        # Speak the angry response
+                        bot_is_speaking = True
+                        angry_audio = audio_processor.text_to_speech(interrupt_response)
+                        subprocess.run(["afplay", angry_audio])
+                        os.remove(angry_audio)
+                        bot_is_speaking = False
+                        
+                        argument_count += 1
+                        update_stats(argument_count=argument_count, last_response=interrupt_response)
+                        print(f"✅ Angry response #{argument_count}!\n")
+                    else:
+                        # Normal completion
+                        argument_count += 1
+                        update_stats(argument_count=argument_count, last_response=response)
+                        print(f"✅ Argument #{argument_count} delivered!\n")
+                    
                     last_activity_time = time.time()
-                    last_response_time = time.time()  # Reset BOTH timers
-                    
-                    # Update stats API
-                    update_stats(argument_count=argument_count, last_response=response)
-                    
-                    print(f"✅ Argument #{argument_count} delivered!\n")
+                    last_response_time = time.time()
                     
                     time.sleep(0.2)
                 
