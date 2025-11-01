@@ -43,26 +43,24 @@ def is_bot_speaking_check(text):
     """Check if this is the bot's own voice coming back."""
     global recent_responses
     
-    # Clean up old responses (keep last 10 for better detection)
-    recent_responses = recent_responses[-10:]
+    # Clean up old responses (keep last 5 - only very recent)
+    recent_responses = recent_responses[-5:]
     
     text_lower = text.lower().strip()
     text_words = set(text_lower.split())
     
-    # Check if we just said this
+    # Only flag if VERY similar to recent response
     for recent in recent_responses:
         recent_lower = recent.lower().strip()
-        
-        # Exact match or contains
-        if text_lower in recent_lower or recent_lower in text_lower:
-            return True
-        
-        # Word overlap check
         recent_words = set(recent_lower.split())
-        if len(text_words) > 3 and len(recent_words) > 3:
+        
+        # Need high word overlap to be considered echo
+        if len(text_words) > 2 and len(recent_words) > 2:
             overlap = len(text_words & recent_words)
-            similarity = overlap / min(len(text_words), len(recent_words))
-            if similarity > 0.7:  # 70%+ similar = probably our own voice
+            similarity = overlap / max(len(text_words), len(recent_words))
+            
+            # Only flag if 80%+ similar (very strict!)
+            if similarity > 0.8:
                 return True
     
     return False
@@ -256,11 +254,11 @@ def main():
             
             with sr.Microphone(**mic_params) as source:
                 try:
-                    # Skip noise adjustment for speed
-                    # recognizer.adjust_for_ambient_noise(source, duration=0.1)
+                    # Quick noise adjustment to improve accuracy
+                    recognizer.adjust_for_ambient_noise(source, duration=0.2)
                     
-                    # Listen for speech - shorter timeout
-                    audio = recognizer.listen(source, timeout=6, phrase_time_limit=8)
+                    # Listen for speech - longer to capture full questions
+                    audio = recognizer.listen(source, timeout=10, phrase_time_limit=15)
                     
                     # Transcribe with Google (faster than Whisper)
                     text = audio_processor.speech_to_text(audio, use_whisper=False)
