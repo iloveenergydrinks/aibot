@@ -1,0 +1,38 @@
+# Environment
+.env
+venv/
+env/
+*.pyc
+__pycache__/
+
+# Sensitive files
+firebase-key.json
+bot_stats.json
+
+# Large files and caches
+*.pdf
+epstein_quotes_cache.json
+extract_citations.py
+
+# Audio files
+*.wav
+*.mp3
+*.ogg
+audio_cache/
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+
+
