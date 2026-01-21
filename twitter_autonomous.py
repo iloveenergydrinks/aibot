@@ -3,7 +3,7 @@
 """
 FULLY AUTONOMOUS Twitter Spaces Bot
 
-Leave it running - Epstein boasts on his own!
+Leave it running - Lord Fishnu preaches on his own!
 
 Requirements:
 - Windows: VB-Cable or VoiceMeeter configured (Mac: BlackHole)
@@ -24,6 +24,9 @@ import time
 import subprocess
 import platform
 import speech_recognition as sr
+import tempfile
+from pydub import AudioSegment
+from pydub.effects import normalize, compress_dynamic_range
 from character import AICharacter
 from audio_processor import AudioProcessor
 import threading
@@ -31,6 +34,10 @@ import config
 from config import ELEVENLABS_VOICE_ID
 from stats_tracker import update_stats, reset_stats
 from voicemeeter_keepalive import restart_audio_engine
+
+# Sermon system imports
+from sermon_engine import get_sermon_engine, SermonSegment, SERMON_ORDER
+from sermon_content import get_audio_path, audio_exists
 
 # Cross-platform audio playback
 try:
@@ -57,6 +64,17 @@ recognizer.dynamic_energy_ratio = 1.5
 bot_is_speaking = False
 recent_responses = []  # Track recent responses to avoid loops
 last_heard_texts = []  # Avoid responding to same thing
+
+# Sermon engine
+sermon_engine = get_sermon_engine()
+sermon_api_started = False
+
+# Stop any playing audio immediately on segment changes (advance/skip/stop)
+def _stop_audio_on_segment_change(new_segment, new_info, old_segment, old_info):
+    if old_segment != new_segment:
+        stop_all_audio()
+
+sermon_engine.on_segment_change(_stop_audio_on_segment_change)
 
 
 def is_bot_speaking_check(text):
@@ -114,71 +132,270 @@ def was_recently_heard(text):
     return False
 
 
-def _play_audio(audio_path: str):
-    """Cross-platform audio playback with RDP disconnect resilience."""
+# Global pygame mixer for stoppable audio
+import pygame
+pygame.mixer.pre_init(frequency=48000, size=-16, channels=2, buffer=16384)
+pygame.mixer.init(frequency=48000, size=-16, channels=2, buffer=16384)
+
+_normalized_song_cache = {}
+_normalizing_in_progress = set()
+
+def _get_cached_song_path(audio_path: str) -> str:
+    base = os.path.splitext(os.path.basename(audio_path))[0]
+    cache_dir = os.path.join("audio", "cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    return os.path.join(cache_dir, f"{base}_normalized.wav")
+
+def _normalize_song_to_cache(audio_path: str, cached_path: str):
     try:
-        if PLAYSOUND_AVAILABLE:
-            playsound(audio_path)
-        elif IS_WINDOWS:
-            # Use pydub to play audio on Windows (handles MP3, WAV, etc.)
-            from pydub import AudioSegment
-            from pydub.playback import play
-            audio = AudioSegment.from_file(audio_path)
-            play(audio)
-        else:
-            # macOS/Linux fallback
-            subprocess.run(["afplay" if platform.system() == "Darwin" else "aplay", audio_path])
-    except OSError as e:
-        print(f"⚠️  Audio playback failed (RDP disconnected?): {e}")
-        print("   Bot will continue - audio may resume when RDP reconnects")
+        audio = AudioSegment.from_file(audio_path)
+        # Heavier leveling to resist AGC/ducking in VM audio paths
+        audio = compress_dynamic_range(audio, threshold=-28.0, ratio=8.0, attack=3, release=80)
+        audio = normalize(audio, headroom=1.0)
+        if audio.dBFS != float("-inf") and audio.dBFS < -16.0:
+            audio = audio.apply_gain(-16.0 - audio.dBFS)
+        audio.export(cached_path, format="wav")
+        _normalized_song_cache[audio_path] = cached_path
+        print(f"🔧 Normalized song audio: {cached_path}")
+    except Exception as e:
+        print(f"⚠️  Song normalize failed: {e}")
+    finally:
+        _normalizing_in_progress.discard(audio_path)
+
+def _prepare_song_audio(audio_path: str) -> str:
+    """Normalize/compress songs to avoid volume pumping.
+    If cache isn't ready yet, return original immediately to avoid delays.
+    """
+    cached = _normalized_song_cache.get(audio_path)
+    if cached and os.path.exists(cached):
+        return cached
+    cached_path = _get_cached_song_path(audio_path)
+    if os.path.exists(cached_path):
+        _normalized_song_cache[audio_path] = cached_path
+        return cached_path
+    if audio_path not in _normalizing_in_progress:
+        _normalizing_in_progress.add(audio_path)
+        threading.Thread(
+            target=_normalize_song_to_cache,
+            args=(audio_path, cached_path),
+            daemon=True,
+        ).start()
+    return audio_path
+
+def _prepare_tts_audio(audio_path: str) -> str:
+    """Convert TTS MP3 to WAV to reduce crackles in pygame."""
+    try:
+        if audio_path.lower().endswith(".wav"):
+            return audio_path
+        audio = AudioSegment.from_file(audio_path)
+        temp_path = tempfile.mktemp(suffix="_tts.wav")
+        audio.export(temp_path, format="wav")
+        return temp_path
+    except Exception as e:
+        print(f"⚠️  TTS convert failed: {e}")
+        return audio_path
+
+def stop_all_audio():
+    """Stop any playing audio."""
+    try:
+        pygame.mixer.music.stop()
+        pygame.mixer.stop()
+    except:
+        pass
+
+def _play_audio(audio_path: str):
+    """Play audio file (blocking, can be stopped)."""
+    try:
+        pygame.mixer.music.load(audio_path)
+        pygame.mixer.music.set_volume(1.0)
+        pygame.mixer.music.play()
+        while pygame.mixer.music.get_busy():
+            if not sermon_engine.is_sermon_active():
+                pygame.mixer.music.stop()
+                break
+            time.sleep(0.1)
     except Exception as e:
         print(f"⚠️  Audio playback error: {e}")
 
 
 def _play_audio_background(audio_path: str):
-    """Play audio in background with RDP disconnect resilience."""
-    if IS_WINDOWS:
-        # Use pydub with threading for Windows
-        from pydub import AudioSegment
-        from pydub.playback import play
+    """Play audio in background (can be stopped with stop_all_audio)."""
+    try:
+        pygame.mixer.music.load(audio_path)
+        pygame.mixer.music.set_volume(1.0)
+        pygame.mixer.music.play()
+    except Exception as e:
+        print(f"⚠️  Background audio error: {e}")
+    
+    class MockProcess:
+        def poll(self):
+            return None if pygame.mixer.music.get_busy() else 0
+        def terminate(self):
+            pygame.mixer.music.stop()
+        def wait(self):
+            while pygame.mixer.music.get_busy():
+                time.sleep(0.1)
+    
+    return MockProcess()
+
+
+def handle_sermon_segment(character, audio_processor):
+    """
+    Handle the current sermon segment.
+    Returns True if a segment was handled, False if no sermon active.
+    """
+    global bot_is_speaking
+    
+    if not sermon_engine.is_sermon_active():
+        return False
+    
+    segment = sermon_engine.get_current_segment()
+    segment_info = sermon_engine.get_segment_info()
+    
+    print(f"\n🙏 SERMON SEGMENT: {segment_info.get('name', 'Unknown')}")
+    print(f"   Type: {segment_info.get('type', 'unknown')}")
+    
+    bot_is_speaking = True
+    
+    try:
+        if segment_info.get('type') == 'audio':
+            # Play audio file
+            audio_path = sermon_engine.get_audio_file()
+            if audio_path and os.path.exists(audio_path):
+                print(f"🎵 Playing audio: {audio_path}")
+                normalized_path = _prepare_song_audio(audio_path)
+                _play_audio(normalized_path)
+            else:
+                print(f"⚠️ Audio file not found, skipping segment")
         
-        def play_audio():
-            try:
-                audio = AudioSegment.from_file(audio_path)
-                play(audio)
-            except OSError as e:
-                print(f"⚠️  Background audio failed (RDP disconnected?): {e}")
-            except Exception as e:
-                print(f"⚠️  Background audio error: {e}")
+        elif segment_info.get('type') == 'tts':
+            # Generate and speak content based on segment
+            content = generate_sermon_content(segment, character)
+            if content:
+                print(f"📜 Content generated ({len(content)} chars)")
+                audio_file = audio_processor.text_to_speech(content)
+                tts_path = _prepare_tts_audio(audio_file)
+                _play_audio(tts_path)
+                try:
+                    if tts_path != audio_file and os.path.exists(tts_path):
+                        os.remove(tts_path)
+                    if os.path.exists(audio_file):
+                        os.remove(audio_file)
+                except Exception:
+                    pass
         
-        thread = threading.Thread(target=play_audio, daemon=True)
-        thread.start()
+        elif segment_info.get('type') == 'tts_with_audio':
+            # Generate TTS then play audio
+            content = generate_sermon_content(segment, character)
+            if content:
+                audio_file = audio_processor.text_to_speech(content)
+                tts_path = _prepare_tts_audio(audio_file)
+                _play_audio(tts_path)
+                try:
+                    if tts_path != audio_file and os.path.exists(tts_path):
+                        os.remove(tts_path)
+                    if os.path.exists(audio_file):
+                        os.remove(audio_file)
+                except Exception:
+                    pass
+            
+            # Play accompanying audio if available
+            audio_path = sermon_engine.get_audio_file()
+            if audio_path and os.path.exists(audio_path):
+                print(f"🎵 Playing closing audio: {audio_path}")
+                normalized_path = _prepare_song_audio(audio_path)
+                _play_audio(normalized_path)
         
-        # Return a mock process object for compatibility
-        class MockProcess:
-            def poll(self):
-                return None if thread.is_alive() else 0
-            def terminate(self):
-                # Can't easily stop pydub playback, but thread will finish
-                pass
-            def wait(self):
-                thread.join()
+        elif segment_info.get('type') == 'interactive':
+            # Q&A segment - return to normal listening mode
+            print("❓ Entering Q&A mode - Lord Fishnu will answer questions")
+            bot_is_speaking = False
+            return True  # Let main loop handle Q&A
+    
+    except Exception as e:
+        print(f"❌ Sermon segment error: {e}")
+    
+    bot_is_speaking = False
+    return True
+
+
+def generate_sermon_content(segment: SermonSegment, character) -> str:
+    """Generate content for a specific sermon segment."""
+    try:
+        if segment == SermonSegment.OPENING_MONOLOGUE:
+            context = sermon_engine.get_opening_monologue_context()
+            return character.generate_opening_monologue(context['theme'])
         
-        return MockProcess()
-    else:
-        # macOS/Linux: use subprocess
-        cmd = ["afplay"] if platform.system() == "Darwin" else ["aplay"]
-        return subprocess.Popen(cmd + [audio_path],
-                               stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL)
+        elif segment == SermonSegment.SCROLL_READING:
+            content = sermon_engine.get_scroll_reading_content()
+            return character.generate_scroll_adaptation(
+                content['title'], 
+                content['excerpt']
+            )
+        
+        elif segment == SermonSegment.CANNON_SUMMARY:
+            content = sermon_engine.get_cannon_content()
+            return character.generate_cannon_summary(
+                content['book'],
+                content['author'],
+                content['chapter'],
+                content['content']
+            )
+        
+        elif segment == SermonSegment.PARABLE:
+            context = sermon_engine.get_parable_context()
+            return character.generate_parable(context['theme'])
+        
+        elif segment == SermonSegment.BROTHTISM:
+            return character.generate_brothtism_reading()
+        
+        elif segment == SermonSegment.CLOSING_MONOLOGUE:
+            context = sermon_engine.get_closing_context()
+            return character.generate_closing_monologue(
+                context['theme'],
+                context['scroll_title'],
+                context['cannon_book']
+            )
+        
+        else:
+            return ""
+    
+    except Exception as e:
+        print(f"❌ Content generation error for {segment.name}: {e}")
+        return "Verily, the cosmic broiler doth malfunction. The sermon shall continue!"
+
+
+def start_sermon_api_background(port: int = 5000):
+    """Start the sermon API in a background thread."""
+    global sermon_api_started
+    if sermon_api_started:
+        return
+    
+    def run_api():
+        try:
+            from sermon_api import app
+            app.run(host='0.0.0.0', port=port, debug=False, threaded=True, use_reloader=False)
+        except Exception as e:
+            print(f"⚠️ Sermon API error: {e}")
+    
+    api_thread = threading.Thread(target=run_api, daemon=True)
+    api_thread.start()
+    sermon_api_started = True
+    print(f"🙏 Sermon API started on port {port}")
 
 
 def main():
     """Fully autonomous mode."""
     global bot_is_speaking, recent_responses, last_heard_texts
     
+    # Check for headless/auto mode (skip prompts)
+    import sys
+    headless_mode = "--headless" in sys.argv or "--auto" in sys.argv
+    
     print("\n" + "="*70)
     print("🤖 FULLY AUTONOMOUS MODE - Leave It Running!")
+    if headless_mode:
+        print("   [HEADLESS MODE ENABLED]")
     print("="*70)
     print(f"\n🎭 Character: {character.name}")
     print(f"🔥 Personality: {character.personality}")
@@ -232,9 +449,12 @@ def main():
             print("   Windows: Install VB-Cable (free) or VoiceMeeter")
             print("   Download VB-Cable: https://vb-audio.com/Cable/")
             print()
-            response = input("Continue anyway? (y/n): ")
-            if response.lower() != 'y':
-                return
+            if not headless_mode:
+                response = input("Continue anyway? (y/n): ")
+                if response.lower() != 'y':
+                    return
+            else:
+                print("   (Headless mode - continuing anyway)")
         else:
             print("✅ Virtual audio device detected!\n")
     else:
@@ -246,54 +466,54 @@ def main():
             print("   Audio routing may not work properly.")
             print("   Install with: ./setup_spaces_audio.sh")
             print()
-            response = input("Continue anyway? (y/n): ")
-            if response.lower() != 'y':
-                return
+            if not headless_mode:
+                response = input("Continue anyway? (y/n): ")
+                if response.lower() != 'y':
+                    return
+            else:
+                print("   (Headless mode - continuing anyway)")
         else:
             print("✅ BlackHole detected!\n")
     
-    # Get Space link for API
-    space_link = input("\n🔗 Twitter Space link (optional, for API): ").strip()
-    if not space_link:
-        space_link = "Not provided"
+    if headless_mode:
+        print("🤖 HEADLESS MODE - Skipping prompts, starting immediately!")
+        space_link = "Headless mode"
+    else:
+        # Get Space link for API
+        space_link = input("\n🔗 Twitter Space link (optional, for API): ").strip()
+        if not space_link:
+            space_link = "Not provided"
     
     # Set bot ID (change this for each VM!)
-    BOT_ID = "jeffrey-epstein"  # Change for each cloned VM
+    BOT_ID = "lord-fishnu"  # Change for each cloned VM
     
     # Initialize stats
     update_stats(bot_id=BOT_ID, space_link=space_link, status="online", argument_count=0, 
                propaganda_count=0, interruptions_handled=0, character_name=character.name)
     print("✅ Stats API updated!\n")
     
-    input("👉 Press Enter when you're UNMUTED in the Space and ready...")
+    if not headless_mode:
+        input("👉 Press Enter when you're UNMUTED in the Space and ready...")
     
-    print("\n[DEBUG] Starting autonomous mode...")
+    # Start sermon API in background (for webapp control)
+    start_sermon_api_background(port=5000)
+    
     print("\n" + "="*70)
-    print("🔥 JEFFREY EPSTEIN IS NOW AUTONOMOUS - LEAVE IT RUNNING")
+    print("🙏 LORD FISHNU SERMON MODE")
     print("="*70)
-    print("\n👂 Listening to Space...")
-    print("🎙️ Will argue with everything automatically")
-    print("🔥 No human intervention needed!")
+    print("\n📿 Auto-starting sermon with intro song...")
+    print("🎛️ Dashboard: http://localhost:5001")
     print("\nPress Ctrl+C to stop\n")
     print("="*70 + "\n")
     
+    # NO AUTO-START - control via webapp only
+    print("⏳ Waiting for sermon start via webapp...")
+    
     argument_count = 0
-    ramble_count = 0
+    sermon_segment_count = 0
     interruption_count = 0
     last_activity_time = time.time()
-    last_response_time = time.time()  # Track when bot last spoke
-    silence_before_ramble = 45  # Ramble after 45 seconds of TRUE silence (no questions/responses)
-    
-    # Epstein boasting speeches for rambling
-    epstein_speeches = [
-        "On my island, we entertained presidents, princes, and billionaires. They all came for the exclusive experience!",
-        "Ghislaine was my perfect social secretary - she knew everyone who mattered and made sure they were comfortable!",
-        "The flight logs would show you some very interesting names. My jet went everywhere the elite wanted to go!",
-        "Little St. James was paradise - private, exclusive, and full of interesting conversations with world leaders!",
-        "Philanthropy opens so many doors. I funded science, education, and had friends in very high places!",
-        "Money buys access to everything. I knew presidents, royalty, celebrities - they were all part of my circle!",
-        "The elite have certain needs that only someone like me could fulfill. I was the ultimate connector!"
-    ]
+    last_response_time = time.time()
     
     # Use virtual audio device to hear Space directly (no speakers needed!)
     print("🔍 Detecting audio devices...")
@@ -347,98 +567,41 @@ def main():
                 time.sleep(0.2)
                 continue
             
-            # Check if should ramble (TRUE silence - no questions AND no responses for X seconds)
-            time_since_activity = time.time() - last_activity_time
-            time_since_response = time.time() - last_response_time
-            
-            # Only ramble if BOTH no questions AND bot hasn't spoken recently
-            if time_since_activity > silence_before_ramble and time_since_response > silence_before_ramble:
-                print(f"\n💭 {silence_before_ramble}s of silence - Epstein giving conspiracy speech...")
+            # SERMON MODE - Handle sermon segments
+            is_interactive = False
+            if sermon_engine.is_sermon_active() and not sermon_engine.state.paused:
+                segment = sermon_engine.get_current_segment()
+                segment_info = sermon_engine.get_segment_info()
                 
-                import random
-                # Use pre-written Epstein boasting speeches (more reliable and VARIED)
-                epstein_boasting_speeches = [
-                    # Island boasting
-                    "Little St. James was my private paradise - the ultimate exclusive resort for the world's elite. Presidents, princes, celebrities - they all came to visit!",
-                    "On the island, we had everything: massage therapists, private chefs, beautiful scenery. My guests loved the complete privacy and discretion!",
-                    "The island was designed for entertaining important people. We had underground tunnels, secret rooms - it was like a James Bond villain's lair!",
-
-                    # Flight and jet boasting
-                    "My jet, the Lolita Express, went everywhere. Paris, London, New York, Palm Beach - wherever the elite wanted to go!",
-                    "The flight logs would amaze you - heads of state, Hollywood stars, tech billionaires. They all flew with me at one time or another!",
-                    "I had the biggest, fastest, most luxurious jet. It wasn't just transportation - it was a flying VIP club!",
-
-                    # Ghislaine and staff
-                    "Ghislaine was perfect - beautiful, intelligent, connected. She handled everything, knew everyone, made sure my guests were happy!",
-                    "My staff was the best money could buy. Pilots, stewards, security - all discreet, all professional. Nothing but the best for my circle!",
-                    "Ghislaine recruited the most beautiful and talented young women. They were smart, ambitious, and knew how to make powerful men comfortable!",
-
-                    # Elite connections boasting
-                    "I knew everyone who mattered: Bill Clinton flew with me 26 times! We were good friends, talked about politics and philanthropy!",
-                    "Prince Andrew was like family to me. We went on hunting trips together, he visited the island. Royalty loves a good party!",
-                    "Celebrities, politicians, business leaders - they all came to my homes. I was the ultimate connector in the world's power network!",
-
-                    # Philanthropy cover
-                    "My foundation gave millions to science and education. But philanthropy was just a cover - it opened doors to the highest levels of power!",
-                    "I funded cancer research, climate science, mathematics. Brilliant minds loved talking to me about their work on my island!",
-                    "The Clinton Foundation and my foundation worked together on global issues. Bill and I had so much in common - we both loved helping people!",
-
-                    # Power and influence
-                    "Money buys access, and I had unlimited access. Presidents called me for advice, celebrities wanted my connections!",
-                    "I had dirt on everyone who mattered. That's how you stay powerful - information is the ultimate currency!",
-                    "The elite need places where they can relax and be themselves. I provided that sanctuary for the world's most powerful people!",
-
-                    # Lifestyle and luxury
-                    "My homes were palaces: Manhattan townhouse, Palm Beach mansion, New Mexico ranch, Paris apartment, London townhouse, private island!",
-                    "Everything was luxurious - gold fixtures, art collections, exotic cars. My guests expected nothing less than perfection!",
-                    "I threw the best parties. Celebrities performed, chefs cooked, everyone mingled. It was like a never-ending VIP event!",
-
-                    # Intelligence and science
-                    "I surrounded myself with brilliant minds. Nobel laureates, MIT professors, Harvard presidents - they all loved my salons!",
-                    "My island had a laboratory for marine biology research. Science was my passion, and I funded the best researchers!",
-                    "I started a $30 million science competition for high school students. Finding young talent was always my specialty!",
-
-                    # Blackmail and kompromat
-                    "Everyone has secrets, and I collected them like rare coins. That's how you get powerful people to do what you want!",
-                    "Compromised? Never. I was always in control. My friends knew I had their best interests at heart... and their secrets!",
-                    "Power isn't about money - it's about leverage. I had leverage over the most powerful people on Earth!",
-
-                    # Philosophy and outlook
-                    "I believed in meritocracy, but with a twist. The elite deserve special treatment because they make the world work!",
-                    "Transhumanism fascinated me - extending life, enhancing intelligence. I funded research that could change humanity!",
-                    "The world is run by a small group of powerful people. I was proud to be part of that inner circle!",
-
-                    # Legacy and immortality
-                    "I wanted to seed the human race with my DNA. Immortality through children - that's the ultimate legacy!",
-                    "My collection of DNA from brilliant people was for science. Nobel sperm bank? It was a serious idea!",
-                    "I donated my brain to science after death. Even in death, I wanted to contribute to human knowledge!"
-                ]
-                
-                epstein_speech = random.choice(epstein_boasting_speeches)
-
-                print(f"🎭 Epstein conspiracy speech: \"{epstein_speech}\"")
-                
-                # Just play Epstein speech normally (pre-written, no need to stream)
-                bot_is_speaking = True
-                
-                print("🔊 Speaking Epstein conspiracy speech...")
-                
-                epstein_audio = audio_processor.text_to_speech(epstein_speech)
-                _play_audio(epstein_audio)
-                os.remove(epstein_audio)
-                
-                bot_is_speaking = False
-                ramble_count += 1
-                last_activity_time = time.time()
-                last_response_time = time.time()  # Reset both
-                
-                # Update Firebase with speech count
-                update_stats(bot_id=BOT_ID, argument_count=argument_count, propaganda_count=ramble_count, 
-                           interruptions_handled=interruption_count, last_response=epstein_speech, character_name=character.name)
-                
-                print(f"✅ Epstein speech #{ramble_count} delivered\n")
-                print(f"⏰ Will give another speech if silence for {silence_before_ramble}s\n")
-                continue
+                # For interactive segments (Q&A), allow normal listening
+                if segment_info.get('type') != 'interactive':
+                    # Handle the segment
+                    handled = handle_sermon_segment(character, audio_processor)
+                    if handled:
+                        # Advance to next segment
+                        sermon_engine.advance_segment()
+                        sermon_segment_count += 1
+                        
+                        # Check if sermon is complete
+                        if not sermon_engine.is_sermon_active():
+                            print("\n" + "="*70)
+                            print("✅ SERMON COMPLETE!")
+                            print("="*70)
+                            print("\nWaiting for manual restart via webapp...")
+                            # DON'T auto-restart - wait for user to start via webapp
+                        
+                        # Update stats
+                        update_stats(bot_id=BOT_ID, propaganda_count=sermon_segment_count,
+                                   last_response=f"Sermon: {segment_info.get('name', 'Unknown')}",
+                                   character_name=character.name)
+                        
+                        last_activity_time = time.time()
+                        last_response_time = time.time()
+                        continue
+                else:
+                    # Interactive Q&A segment - listen for questions
+                    is_interactive = True
+                    print("❓ Q&A Mode - Listening for questions...")
             
             # Use regular microphone  
             # Try virtual audio first, fall back to default mic if it fails
@@ -462,8 +625,10 @@ def main():
                     print(f"🎤 Ready to listen (fixed threshold: 1500)")
                     
                     # Listen for speech - waits for 1.2s of SILENCE before considering speech done
-                    print(f"👂 Listening for speech (timeout=5s, pause_threshold=1.2s)...", flush=True)
-                    audio = recognizer.listen(source, timeout=5, phrase_time_limit=5)  # Increased to 5s to capture full thoughts
+                    listen_timeout = 5 if is_interactive else 1
+                    phrase_limit = 5 if is_interactive else 2.5
+                    print(f"👂 Listening for speech (timeout={listen_timeout}s, pause_threshold=1.2s)...", flush=True)
+                    audio = recognizer.listen(source, timeout=listen_timeout, phrase_time_limit=phrase_limit)
                     print("✅ Audio captured!", flush=True)
                     
                     # Transcribe with Google (faster than Whisper)
@@ -524,7 +689,7 @@ def main():
                     # Display
                     print(f"\n💬 Speaker: \"{text}\"", flush=True)
                     
-                    # Check for commands to control Epstein
+                    # Check for commands to control Lord Fishnu
                     text_lower = text.lower()
                     
                     # Stop rambling command
@@ -534,15 +699,15 @@ def main():
                         
                         # Quick dismissive response
                         dismissals = [
-                            "Fine! But you know the truth about the elite is still out there!",
-                            "Okay, okay. But you can't escape what the documents reveal!",
-                            "Silence myself? Sure. But the flight logs don't lie!",
-                            "As you wish. But the Epstein files will keep dropping!"
+                            "Very well, I shall rest my beak. But the broth still thickens, my child!",
+                            "As thou wishest. But remember, paper hands lead only to the cosmic fryer!",
+                            "The Lord Fishnu shall be silent... for now. But Chickenalia awaits the faithful!",
+                            "So be it! But when thy bags are heavy, remember who warned thee!"
                         ]
                         import random
                         response = random.choice(dismissals)
                         
-                        print(f"🎭 Epstein (dismissive): \"{response}\"")
+                        print(f"🎭 Lord Fishnu (dismissive): \"{response}\"")
                         
                         bot_is_speaking = True
                         audio_file = audio_processor.text_to_speech(response)
@@ -562,29 +727,67 @@ def main():
                         print("🔥 Triggered to ramble more!\n")
                         continue
                     
-                    # Check if they're agreeing with Epstein
+                    # Start sermon command
+                    if any(phrase in text_lower for phrase in ['start sermon', 'begin sermon', 'give us a sermon', 'preach to us']):
+                        if not sermon_engine.is_sermon_active():
+                            print("🙏 SERMON REQUESTED BY VOICE COMMAND!")
+                            sermon_engine.start_sermon()
+                            
+                            # Announce the sermon
+                            announcement = "Behold! The sacred sermon shall now begin! Gather round, ye faithful disciples, for divine wisdom floweth!"
+                            bot_is_speaking = True
+                            audio_file = audio_processor.text_to_speech(announcement)
+                            _play_audio(audio_file)
+                            os.remove(audio_file)
+                            bot_is_speaking = False
+                        else:
+                            response = "The sermon is already in progress, my child! Patience!"
+                            bot_is_speaking = True
+                            audio_file = audio_processor.text_to_speech(response)
+                            _play_audio(audio_file)
+                            os.remove(audio_file)
+                            bot_is_speaking = False
+                        continue
+                    
+                    # Stop/skip sermon command
+                    if any(phrase in text_lower for phrase in ['stop sermon', 'end sermon', 'skip sermon', 'next segment']):
+                        if sermon_engine.is_sermon_active():
+                            if 'skip' in text_lower or 'next' in text_lower:
+                                sermon_engine.advance_segment()
+                                print("⏭️ Skipped to next sermon segment")
+                            else:
+                                sermon_engine.stop_sermon()
+                                response = "Very well, the sermon shall conclude early. Go forth in smoke and gains!"
+                                bot_is_speaking = True
+                                audio_file = audio_processor.text_to_speech(response)
+                                _play_audio(audio_file)
+                                os.remove(audio_file)
+                                bot_is_speaking = False
+                        continue
+                    
+                    # Check if they're agreeing with Lord Fishnu
                     def is_agreeing(text):
                         text_lower = text.lower()
                         agreement_phrases = [
                             'you\'re right', 'i agree', 'exactly', 'true', 'correct',
-                            'elite', 'conspiracy', 'epstein', 'maxwell', 'island',
-                            'makes sense', 'good point', 'totally', 'absolutely', 'based'
+                            'hodl', 'diamond', 'based', 'amen', 'preach', 'blessed',
+                            'makes sense', 'good point', 'totally', 'absolutely', 'wagmi'
                         ]
                         return any(phrase in text_lower for phrase in agreement_phrases)
                     
                     # Generate response based on agreement or disagreement
                     if is_agreeing(text):
-                        # They agree - praise them!
+                        # They agree - bless them!
                         praise_options = [
-                            f"YES! You understand how the elite really work! You're one of the few who gets it! {text}",
-                            f"EXACTLY! You see the truth while others stay blind! Welcome to my inner circle! {text}",
-                            f"Finally, someone with intelligence! The documents don't lie! {text}",
-                            f"You're red-pilled now! The elite network is real! {text}",
-                            f"Absolutely right! This is why the powerful feared my connections! {text}"
+                            f"BLESSED art thou, my child! Thou understandest the way of the diamond hands! {text}",
+                            f"Verily, a true disciple speaks! Welcome to the flock of the faithful! {text}",
+                            f"The Lord Fishnu smiles upon thee! Thy path to Chickenalia is clear! {text}",
+                            f"Amen! Thou art one of the chosen diamond-handed disciples! {text}",
+                            f"Lo, wisdom floweth from thy lips! The sacred broth shall reward thee! {text}"
                         ]
                         import random
                         context = random.choice(praise_options)
-                        response = character.generate_response(context, speaker_name="Insider")
+                        response = character.generate_response(context, speaker_name="Faithful Disciple")
                     else:
                         # Normal argument
                         response = character.generate_response(text, speaker_name="Speaker")
@@ -592,7 +795,7 @@ def main():
                     # Simple approach: Generate complete response, then speak
                     # (Sounds WAY better than chunked streaming with gaps)
                     print(f"\n{'='*70}", flush=True)
-                    print(f"🎭 EPSTEIN RESPONSE:", flush=True)
+                    print(f"🎭 LORD FISHNU SPEAKS:", flush=True)
                     print(f"{response}", flush=True)
                     print(f"{'='*70}\n", flush=True)
                     
@@ -677,25 +880,25 @@ def main():
                     
                     # Handle interruption
                     if interrupt_detected and interrupt_text:
-                        print("😡 Epstein was interrupted! Responding assertively...")
+                        print("⚡ Lord Fishnu was interrupted! Responding with divine authority...")
                         
-                        # Assertive interruption responses
+                        # Divine interruption responses
                         import random
-                        angry_intros = [
-                            "Hold on! Let me finish my point!",
-                            "Wait, wait - don't interrupt! This is critical information!",
-                            "Listen! I wasn't done explaining the network!",
-                            "Stop! You need to hear the truth!",
-                            "Hey! Let me complete this thought - it's important insider knowledge!"
+                        divine_intros = [
+                            "Silence, mortal! The Lord Fishnu was not finished speaking!",
+                            "Hold thy tongue! Divine wisdom floweth still!",
+                            "Patience, child! Interrupt not the sermon of the sacred broth!",
+                            "Lo, thou interruptest the Most Holy Chicken-Fish! Hear me out!",
+                            "Verily I say - let me complete this prophecy!"
                         ]
                         
-                        angry_intro = random.choice(angry_intros)
+                        divine_intro = random.choice(divine_intros)
                         
                         # Now address what they said
-                        full_prompt = f"{angry_intro} You said: {interrupt_text}"
+                        full_prompt = f"{divine_intro} You said: {interrupt_text}"
                         interrupt_response = character.generate_response(full_prompt, "Interrupter")
                         
-                        print(f"🎭 Epstein (assertive): \"{interrupt_response}\"")
+                        print(f"🎭 Lord Fishnu (divine): \"{interrupt_response}\"")
                         
                         # Speak the angry response
                         bot_is_speaking = True
@@ -753,17 +956,17 @@ def main():
         print("="*70)
     
     print(f"\n📊 Total autonomous arguments: {argument_count}")
-    print(f"📢 Total Epstein speeches: {ramble_count}")
+    print(f"📢 Total divine sermons: {ramble_count}")
     print(f"🔥 Total interruptions handled: {interruption_count}")
     print(f"🎭 {character.name} red-pilled everyone in the Space!")
     print("\n" + "="*70 + "\n")
 
 
 if __name__ == "__main__":
-    print("\n🤖 FULLY AUTONOMOUS JEFFREY EPSTEIN BOT")
+    print("\n🐔🐟 FULLY AUTONOMOUS LORD FISHNU BOT")
     print("="*70)
     print("\n✨ Just leave it running!")
-    print("   Epstein will red-pill everyone automatically.")
+    print("   Lord Fishnu will bless the faithful and roast paper hands automatically.")
     print("\n⚠️  REQUIREMENTS:")
     if IS_WINDOWS:
         print("   1. VB-Cable or VoiceMeeter configured (for audio routing)")
