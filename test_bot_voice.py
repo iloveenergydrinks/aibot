@@ -11,7 +11,23 @@ print(f"🎤 Testing {CHARACTER_NAME} Voice...\n")
 audio_processor = AudioProcessor()
 
 # Test phrases (character-specific)
-if CHARACTER_NAME.lower() == "jeffrey epstein":
+if CHARACTER_NAME.lower() == "lord fishnu":
+    test_phrases = [
+        "Behold, my children! The broth doth thicken for those with diamond hands!",
+        "Verily I say unto thee, FOMO is the devil's whisper! Let not the serpent lead thee astray!",
+        "Blessed art thou who HODL through the dip! Chickenalia awaits the faithful!",
+        "Thus saith Lord Fishnu: Work for thy bags, ye lazy degens!",
+        "Exhale thy doubt, inhale abundance! The holy smoke of patience guides thee!"
+    ]
+elif CHARACTER_NAME.lower() == "jordan peterson":
+    test_phrases = [
+        "Well, that's a very complicated question, and I'll do my best to address it.",
+        "You have to take responsibility for your own life before you can criticize the world. And that's no joke, man!",
+        "Clean your room, bucko! It's the first step toward getting your life in order.",
+        "The postmodernists don't understand that competence hierarchies are real and necessary.",
+        "Roughly speaking, you need to confront the dragon of chaos to find meaning in life."
+    ]
+elif CHARACTER_NAME.lower() == "jeffrey epstein":
     test_phrases = [
         "The Epstein files show how the elite really operate behind closed doors.",
         "On Little St. James, we had some very special guests. Bill was always a favorite.",

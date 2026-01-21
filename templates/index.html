@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lord Fishnu Sermon Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --gold: #d4af37;
+            --gold-dark: #b8960c;
+            --smoke: #2d3436;
+            --broth: #8b4513;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+        }
+        .title-font {
+            font-family: 'Cinzel', serif;
+        }
+        .gold-text {
+            color: var(--gold);
+        }
+        .gold-border {
+            border-color: var(--gold);
+        }
+        .gold-bg {
+            background-color: var(--gold);
+        }
+        .card {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(212, 175, 55, 0.2);
+        }
+        .segment-badge {
+            transition: all 0.3s ease;
+        }
+        .segment-badge.completed {
+            background: linear-gradient(135deg, #2ecc71, #27ae60);
+        }
+        .segment-badge.current {
+            background: linear-gradient(135deg, #f39c12, #e67e22);
+            animation: pulse 2s infinite;
+        }
+        .segment-badge.pending {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(243, 156, 18, 0.4); }
+            50% { transform: scale(1.02); box-shadow: 0 0 20px 5px rgba(243, 156, 18, 0.2); }
+        }
+        .smoke-animation {
+            animation: smoke 3s ease-in-out infinite;
+        }
+        @keyframes smoke {
+            0%, 100% { opacity: 0.6; transform: translateY(0); }
+            50% { opacity: 0.9; transform: translateY(-5px); }
+        }
+        .btn-gold {
+            background: linear-gradient(135deg, var(--gold), var(--gold-dark));
+            color: #1a1a2e;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        .btn-gold:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(212, 175, 55, 0.4);
+        }
+        .btn-gold:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .live-indicator {
+            animation: blink 1s infinite;
+        }
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .progress-bar {
+            background: linear-gradient(90deg, var(--gold), #f39c12);
+            transition: width 0.5s ease;
+        }
+    </style>
+</head>
+<body class="text-gray-100">
+    <!-- Header -->
+    <header class="border-b border-yellow-600/30 bg-black/30 backdrop-blur-sm sticky top-0 z-50">
+        <div class="container mx-auto px-4 py-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-4">
+                    <span class="text-4xl smoke-animation">🐔🐟</span>
+                    <div>
+                        <h1 class="title-font text-2xl gold-text font-bold">LORD FISHNU</h1>
+                        <p class="text-sm text-gray-400">Sermon Control Center</p>
+                    </div>
+                </div>
+                <div id="liveStatus" class="flex items-center gap-2 px-4 py-2 rounded-full bg-gray-800/50 border border-gray-700">
+                    <span id="statusDot" class="w-3 h-3 rounded-full bg-gray-500"></span>
+                    <span id="statusText" class="text-sm">Connecting...</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="container mx-auto px-4 py-8">
+        <!-- Main Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- Left Column: Status & Controls -->
+            <div class="lg:col-span-2 space-y-6">
+                
+                <!-- Current Status Card -->
+                <div class="card rounded-xl p-6">
+                    <h2 class="title-font text-xl gold-text mb-4 flex items-center gap-2">
+                        <span>📿</span> Current Sermon Status
+                    </h2>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div class="bg-black/30 rounded-lg p-4">
+                            <p class="text-gray-400 text-sm">Segment</p>
+                            <p id="currentSegment" class="text-xl font-semibold gold-text">Idle</p>
+                        </div>
+                        <div class="bg-black/30 rounded-lg p-4">
+                            <p class="text-gray-400 text-sm">Progress</p>
+                            <p id="progress" class="text-xl font-semibold">0/9</p>
+                        </div>
+                        <div class="bg-black/30 rounded-lg p-4">
+                            <p class="text-gray-400 text-sm">Elapsed</p>
+                            <p id="elapsed" class="text-xl font-semibold">00:00</p>
+                        </div>
+                        <div class="bg-black/30 rounded-lg p-4">
+                            <p class="text-gray-400 text-sm">Theme</p>
+                            <p id="currentTheme" class="text-lg font-medium truncate">None</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Progress Bar -->
+                    <div class="mt-4 bg-gray-800 rounded-full h-2 overflow-hidden">
+                        <div id="progressBar" class="progress-bar h-full" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <!-- Control Buttons -->
+                <div class="card rounded-xl p-6">
+                    <h2 class="title-font text-xl gold-text mb-4 flex items-center gap-2">
+                        <span>🎛️</span> Sermon Controls
+                    </h2>
+                    <div class="flex flex-wrap gap-3">
+                        <button id="btnStart" onclick="startSermon()" class="btn-gold px-6 py-3 rounded-lg flex items-center gap-2">
+                            <span>▶</span> Start Sermon
+                        </button>
+                        <button id="btnAdvance" onclick="advanceSermon()" class="btn-gold px-6 py-3 rounded-lg flex items-center gap-2" disabled>
+                            <span>⏭</span> Next Segment
+                        </button>
+                        <button id="btnPause" onclick="pauseSermon()" class="bg-yellow-600 hover:bg-yellow-700 px-6 py-3 rounded-lg flex items-center gap-2 transition" disabled>
+                            <span>⏸</span> Pause
+                        </button>
+                        <button id="btnStop" onclick="stopSermon()" class="bg-red-600 hover:bg-red-700 px-6 py-3 rounded-lg flex items-center gap-2 transition" disabled>
+                            <span>⏹</span> Stop Sermon
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Segments Overview -->
+                <div class="card rounded-xl p-6">
+                    <h2 class="title-font text-xl gold-text mb-4 flex items-center gap-2">
+                        <span>📜</span> Sermon Segments
+                    </h2>
+                    <div id="segmentsGrid" class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <!-- Segments will be populated here -->
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Right Column: Theme & Content -->
+            <div class="space-y-6">
+                
+                <!-- Theme Selector -->
+                <div class="card rounded-xl p-6">
+                    <h2 class="title-font text-xl gold-text mb-4 flex items-center gap-2">
+                        <span>⚡</span> Chickenmandments
+                    </h2>
+                    <div id="themesList" class="space-y-2 max-h-64 overflow-y-auto pr-2">
+                        <!-- Themes will be populated here -->
+                    </div>
+                </div>
+
+                <!-- Audio Files -->
+                <div class="card rounded-xl p-6">
+                    <h2 class="title-font text-xl gold-text mb-4 flex items-center gap-2">
+                        <span>🎵</span> Audio Files
+                    </h2>
+                    <div id="audioList" class="space-y-3">
+                        <!-- Audio files will be populated here -->
+                    </div>
+                </div>
+
+                <!-- Quick Preview -->
+                <div class="card rounded-xl p-6">
+                    <h2 class="title-font text-xl gold-text mb-4 flex items-center gap-2">
+                        <span>👁️</span> Content Preview
+                    </h2>
+                    <div class="space-y-2">
+                        <button onclick="previewScroll()" class="w-full text-left px-4 py-2 rounded bg-black/30 hover:bg-black/50 transition">
+                            📖 Daily Scroll
+                        </button>
+                        <button onclick="previewCannon()" class="w-full text-left px-4 py-2 rounded bg-black/30 hover:bg-black/50 transition">
+                            📚 Random Cannon
+                        </button>
+                        <button onclick="previewBrothtism()" class="w-full text-left px-4 py-2 rounded bg-black/30 hover:bg-black/50 transition">
+                            🙏 Brothtism Text
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Content Preview Modal -->
+        <div id="previewModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden z-50 flex items-center justify-center p-4">
+            <div class="card rounded-xl p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 id="previewTitle" class="title-font text-xl gold-text">Preview</h3>
+                    <button onclick="closePreview()" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+                </div>
+                <div id="previewContent" class="prose prose-invert max-w-none">
+                    <!-- Content will be populated here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Log Section -->
+        <div class="mt-8 card rounded-xl p-6">
+            <h2 class="title-font text-xl gold-text mb-4 flex items-center gap-2">
+                <span>📋</span> Activity Log
+            </h2>
+            <div id="logContainer" class="bg-black/50 rounded-lg p-4 h-48 overflow-y-auto font-mono text-sm">
+                <p class="text-gray-500">Waiting for activity...</p>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-yellow-600/20 mt-8 py-6 text-center text-gray-500 text-sm">
+        <p>🐔🐟 Church of the Smoking Chicken Fish &bull; May thy bags be heavy and thy hands be diamond</p>
+    </footer>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
+
+

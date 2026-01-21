@@ -23,6 +23,16 @@ CHARACTER_VOICES = {
         "audio_file": "Jeffrey Epsteins Most Controversial Interview_ Shocking Moments Revealed-[AudioTrimmer.com].mp3",
         "description": "Controversial financier and philanthropist, conspiratorial and enigmatic voice",
         "labels": '{"accent": "american", "age": "middle-aged", "gender": "male", "use_case": "conversational"}'
+    },
+    "Jordan Peterson": {
+        "audio_file": "Jordan Peterson High Quality Voice Sample ElevenLabs AI Voice - Aayush Gupta_E♭_minor__bpm_52 (1).mp3",
+        "description": "Clinical psychologist, professor, intellectual with distinctive Canadian accent",
+        "labels": '{"accent": "canadian", "age": "middle-aged", "gender": "male", "use_case": "educational"}'
+    },
+    "Lord Fishnu": {
+        "audio_file": "lord_fishnu_voice.mp3",  # You'll need to provide this file - deep, gravelly, chain-smoker voice
+        "description": "Divine chicken-fish deity, deep gravelly chain-smoker voice, cosmic sage energy",
+        "labels": '{"accent": "neutral", "age": "ancient", "gender": "male", "use_case": "entertainment"}'
     }
 }
 

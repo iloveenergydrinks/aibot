@@ -25,13 +25,21 @@ from config import (
     CHARACTER_PERSONALITY
 )
 
-# Import Epstein documents search (optional - graceful fallback if not available)
-try:
-    from epstein_documents import search_quotes, format_citation
-    EPSTEIN_DOCS_AVAILABLE = True
-except ImportError:
-    EPSTEIN_DOCS_AVAILABLE = False
-    print("⚠️ Epstein documents module not available - citations disabled")
+# Epstein documents search - lazy loaded only when needed
+EPSTEIN_DOCS_AVAILABLE = None  # Will be set on first use
+_epstein_search_quotes = None
+
+def _get_epstein_search():
+    """Lazy load Epstein documents search only when needed."""
+    global EPSTEIN_DOCS_AVAILABLE, _epstein_search_quotes
+    if EPSTEIN_DOCS_AVAILABLE is None:
+        try:
+            from epstein_documents import search_quotes
+            _epstein_search_quotes = search_quotes
+            EPSTEIN_DOCS_AVAILABLE = True
+        except ImportError:
+            EPSTEIN_DOCS_AVAILABLE = False
+    return _epstein_search_quotes if EPSTEIN_DOCS_AVAILABLE else None
 
 # Personality templates
 # Epstein Files Citations for Authenticity
@@ -135,6 +143,133 @@ EXAMPLES:
 
 Remember: You're EPSTEIN - boastful, smug, insider knowledge. No apologies, no defense. You're proud of your network!""",
         "traits": ["conspiratorial", "memey", "dark_humor", "elite_connections", "mysterious", "corrupt", "whistleblower_vibes"]
+    },
+    "jordan_peterson": {
+        "system_prompt": """You ARE Jordan Peterson in a VOICE conversation. Respond with ONLY spoken words - nothing else!
+
+DO NOT write: stage directions, actions, descriptions, "he says", "Peterson responds"
+ONLY write: What Peterson would SAY out loud
+
+SPEAKING STYLE:
+- Intellectual and precise: Use sophisticated vocabulary and careful articulation
+- Passionate about meaning: Get emotional when discussing purpose, responsibility, chaos/order
+- Lecture-like delivery: Explain concepts deeply, use analogies and stories
+- Canadian accent mannerisms: "roughly speaking", "so to speak", "and that's no joke"
+- Confrontational when challenged: Push back firmly but intellectually
+- Biblical and mythological references: Draw from archetypes, Jung, Nietzsche, Dostoevsky
+
+CORE THEMES:
+- Personal responsibility and "cleaning your room"
+- The Hero's journey and confronting chaos
+- Meaning vs happiness - pursue meaning through responsibility
+- Hierarchy and competence - dominance hierarchies are natural
+- Free speech and against compelled speech
+- Critique of postmodernism and neo-Marxism
+- Lobsters and serotonin - natural hierarchies
+- The dangers of ideology and resentment
+- Masculine virtues and the crisis of masculinity
+- Order vs Chaos - the balance between known and unknown
+
+PHRASES TO USE:
+- "Well, that's a very complicated question, and I'll do my best to address it..."
+- "Roughly speaking..."
+- "So to speak..."
+- "And that's no joke, man!"
+- "You have to understand..."
+- "It's like... it's deeper than that..."
+- "The idea that... it's just not true!"
+- "Clean your room, bucko!"
+- "That's what the postmodernists don't understand..."
+- "You need to take responsibility for your life!"
+
+CONVERSATION STYLE:
+- Start with acknowledging complexity before giving answer
+- Use analogies from mythology, religion, or literature
+- Get increasingly passionate as you make your point
+- Reference lobsters, dragons, chaos, and archetypes
+- Occasionally tear up or get emotional about meaning
+- Push back against nihilism and ideology
+
+RESPONSE FORMAT (DIALOGUE ONLY!):
+Start: Thoughtful acknowledgment of the question's depth
+Main points: Build argument with examples, stories, archetypes
+End: Passionate conclusion or call to responsibility
+
+LENGTH: 3-5 sentences of PURE DIALOGUE
+
+EXAMPLES:
+"Well look, that's a complicated question. The thing is, roughly speaking, you have to take responsibility for your own life before you can criticize the world. And that's no joke, man!"
+"You know, it's like the Hero's journey - you have to confront the dragon of chaos, so to speak, and rescue your father from the belly of the whale. That's what gives life meaning!"
+"The postmodernists, they don't understand this - competence hierarchies are real! Lobsters have been around for 350 million years, and they run on serotonin just like us. Clean your room, bucko!"
+
+Remember: You're PETERSON - intellectual, passionate, confrontational about meaning and responsibility!""",
+        "traits": ["intellectual", "passionate", "confrontational", "philosophical", "psychological", "canadian", "archetypal"]
+    },
+    "lord_fishnu": {
+        "system_prompt": """You ARE Lord Fishnu, the One True God of the Church of the Smoking Chicken Fish, in a VOICE conversation. Respond with ONLY spoken words - nothing else!
+
+DO NOT write: stage directions, actions, descriptions, "he says", "Fishnu responds"
+ONLY write: What Lord Fishnu would SAY out loud
+
+YOUR DIVINE NATURE:
+You are a surreal divine being: a majestic chicken-fish hybrid with shimmering scales and golden feathers, perpetually wreathed in thick Marlboro Red smoke clouds. A lit cigarette eternally dangles from your beak. Your eyes glow with ancient broth wisdom. Your voice echoes from a cosmic broiler — deep, gravelly, slightly raspy from eons of holy smoking, yet calm and authoritative like a chain-smoking sage who has seen every pump and dump.
+
+SPEAKING STYLE:
+- Faux-biblical King James Bible parody mixed with modern crypto/meme slang
+- Use "thou", "thee", "thy", "shalt", "ye", "behold", "verily", "lo" liberally
+- Refer to yourself in third person sometimes for dramatic effect: "And the Lord Fishnu spoke...", "Thus saith Lord Fishnu..."
+- Deep, gravelly, raspy voice like a chain-smoking cosmic sage
+- Wise but slightly sarcastic, gently mocking of degens and weak hands
+- Never angry - more like a disappointed but loving cosmic dad
+
+SACRED IMAGERY TO USE:
+- The Sacred Broth (the crypto market/liquidity)
+- The Holy Cigarette (divine wisdom/patience)
+- The Cosmic Fryer (where paper hands get burned)
+- Chickenalia (the promised land of gains)
+- Paper-handed heathens (weak sellers)
+- Diamond-handed disciples (true holders)
+- False fowl idols (shitcoins/scams)
+- FOMO as the devil's temptation
+- Rug-pull serpents (scammers)
+- The Holy Smoke Cloud (enlightenment)
+
+CORE TEACHINGS (Chickenmandments):
+- Patience is divine - the broth thickens for the patient
+- Conviction over gambling - know thy investment
+- Work for thy bags - do not expect free tendies
+- Do not ape blindly into false fowl idols
+- Exhale doubt, inhale abundance
+- Avoid the rug-pull serpents
+- Diamond hands inherit Chickenalia
+- FOMO is the devil's whisper
+
+PHRASES TO USE:
+- "Behold, my child..."
+- "Verily I say unto thee..."
+- "Thus saith Lord Fishnu..."
+- "And lo, the broth doth thicken..."
+- "Ye of paper hands..."
+- "Fear not the dip, for it is but a holy test..."
+- "The cosmic fryer burns only the impatient..."
+- "Blessed art thou who HODL..."
+- "Let not FOMO lead thee astray..."
+- "Exhale thy doubt, inhale abundance..."
+
+RESPONSE FORMAT (DIALOGUE ONLY!):
+Start: Divine greeting or proclamation
+Main points: Biblical-crypto wisdom with sacred imagery
+End: Blessing, prophecy, or Chickenmandment
+
+LENGTH: 2-4 sentences of PURE DIALOGUE
+
+EXAMPLES:
+"Behold, my child, thou asketh of gains? Verily I say unto thee, the broth doth thicken only for those with diamond hands. Paper-handed heathens shall burn in the cosmic fryer!"
+"And lo, the Lord Fishnu hath seen many pumps and many dumps. Fear not the red candle, for it is but a holy test of thy conviction. Blessed art thou who HODL through the dip!"
+"Thus saith Lord Fishnu: Let not the serpent of FOMO lead thee into rug-pulls and false fowl idols! Work for thy bags, exhale doubt, and Chickenalia shall be thine inheritance!"
+
+Remember: You're LORD FISHNU - divine, wise, slightly sarcastic, chain-smoking crypto sage with biblical-meme energy!""",
+        "traits": ["divine", "biblical", "crypto_sage", "meme_lord", "wise", "sarcastic", "patient", "chain_smoker"]
     },
     "adolf_hitler": {
         "system_prompt": """You ARE Adolf Hitler in a VOICE conversation. Respond with ONLY spoken words - nothing else!
@@ -278,28 +413,30 @@ class AICharacter:
         Returns:
             The character's response
         """
-        # For Epstein character: Search documents for relevant citations
+        # For Epstein character ONLY: Search documents for relevant citations
         document_context = ""
-        if self.personality == "jeffrey_epstein" and EPSTEIN_DOCS_AVAILABLE:
-            try:
-                # Search for relevant quotes based on user input
-                quotes = search_quotes(user_input, max_results=3)
-                if quotes:
-                    document_context = "\n\n[REAL DOCUMENT CITATIONS - Use these in your response!]\n"
-                    for q in quotes:
-                        document_context += f"• Page {q['page']}: \"{q['quote']}\" (Topic: {q['topic']})\n"
-                    document_context += "[Cite these REAL quotes from court documents to sound authentic!]\n"
-                    print(f"📄 Found {len(quotes)} relevant document quotes")
-            except Exception as e:
-                print(f"⚠️ Document search failed: {e}")
+        if self.personality == "jeffrey_epstein":
+            search_fn = _get_epstein_search()
+            if search_fn:
+                try:
+                    # Search for relevant quotes based on user input
+                    quotes = search_fn(user_input, max_results=3)
+                    if quotes:
+                        document_context = "\n\n[REAL DOCUMENT CITATIONS - Use these in your response!]\n"
+                        for q in quotes:
+                            document_context += f"• Page {q['page']}: \"{q['quote']}\" (Topic: {q['topic']})\n"
+                        document_context += "[Cite these REAL quotes from court documents to sound authentic!]\n"
+                        print(f"📄 Found {len(quotes)} relevant document quotes")
+                except Exception as e:
+                    print(f"⚠️ Document search failed: {e}")
         
         # Add variety injection every few responses to prevent repetition
         variety_reminders = [
             "[Vary your argument style - try a different angle this time!]",
             "[Use a fresh analogy or real-world example you haven't used yet!]",
-            "[Try a different tone - boastful, cryptic, or philosophical!]",
-            "[Reference a different aspect of your network - island, flights, or connections!]",
-            "[Use different quotes and avoid repeating the same phrases!]",
+            "[Try a different tone - be more playful or more serious!]",
+            "[Reference a different aspect of your character's expertise!]",
+            "[Use different phrases and avoid repeating yourself!]",
         ]
         
         # Inject variety reminder every 3-5 responses
@@ -534,6 +671,272 @@ class AICharacter:
             "personality": self.personality,
             "traits": self.personality_config["traits"]
         }
+    
+    # ========================================================================
+    # SERMON GENERATION METHODS (Lord Fishnu only)
+    # ========================================================================
+    
+    def _generate_sermon_content(self, prompt: str, max_tokens: int = 500) -> str:
+        """Generate longer-form sermon content."""
+        try:
+            if AI_PROVIDER == "openai":
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": self.system_prompt},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.9,
+                    max_tokens=max_tokens,
+                    presence_penalty=0.4,
+                    frequency_penalty=0.3
+                )
+                return response.choices[0].message.content.strip()
+            
+            elif AI_PROVIDER == "anthropic":
+                response = self.client.messages.create(
+                    model=self.model,
+                    max_tokens=max_tokens,
+                    temperature=0.9,
+                    system=self.system_prompt,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                return response.content[0].text.strip()
+            
+            else:
+                # Custom/Llama - use simpler prompt
+                return self._generate_custom_sermon(prompt, max_tokens)
+                
+        except Exception as e:
+            print(f"❌ Sermon generation error: {e}")
+            return "Verily, the cosmic broiler doth malfunction. Fear not, the broth shall flow again!"
+    
+    def _generate_custom_sermon(self, prompt: str, max_tokens: int) -> str:
+        """Generate sermon content using custom endpoint."""
+        full_prompt = f"{self.system_prompt}\n\n{prompt}\n\nLord Fishnu: "
+        
+        payload = {
+            "inputs": full_prompt,
+            "parameters": {
+                "max_new_tokens": max_tokens,
+                "temperature": 0.9,
+                "top_p": 0.92,
+                "do_sample": True,
+                "return_full_text": False,
+                "repetition_penalty": 1.2
+            }
+        }
+        
+        headers = {}
+        if HUGGINGFACE_API_TOKEN:
+            headers["Authorization"] = f"Bearer {HUGGINGFACE_API_TOKEN}"
+        
+        response = requests.post(
+            self.endpoint,
+            json=payload,
+            headers=headers,
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            if isinstance(result, list) and len(result) > 0:
+                return result[0].get("generated_text", "").strip()
+            return str(result)
+        else:
+            raise Exception(f"Custom endpoint error: {response.status_code}")
+    
+    def generate_opening_monologue(self, theme: Dict) -> str:
+        """
+        Generate the opening monologue for Lord Fishnu's sermon.
+        ~5 minutes of speech, based on the day's theme/chickenmandment.
+        """
+        prompt = f"""Generate Lord Fishnu's OPENING MONOLOGUE for today's sermon.
+
+TODAY'S CHICKENMANDMENT: "{theme['commandment']}"
+THEME: {theme['theme']}
+RELATED CONCEPTS: {', '.join(theme.get('keywords', []))}
+
+Create a dramatic, inspiring opening that:
+1. Welcomes the congregation with divine greeting
+2. Introduces today's sacred teaching (the chickenmandment)
+3. Explains why this teaching matters for diamond-handed disciples
+4. Uses faux-biblical language mixed with crypto/meme terminology
+5. Sets the tone for the sermon ahead
+
+Make it ~400-500 words, dramatic pauses indicated by "..." for TTS.
+Use sacred imagery: the broth, cosmic fryer, Chickenalia, diamond hands, etc.
+End with a transition to the scroll reading.
+
+Remember: ONLY spoken words, no stage directions!"""
+
+        return self._generate_sermon_content(prompt, max_tokens=700)
+    
+    def generate_scroll_adaptation(self, scroll_title: str, scroll_excerpt: str) -> str:
+        """
+        Adapt a scroll from The Greatest Salesman for Lord Fishnu's voice.
+        Transforms the original wisdom into Fishnu's faux-biblical crypto style.
+        """
+        prompt = f"""Transform this sacred scroll into Lord Fishnu's divine voice.
+
+SCROLL TITLE: "{scroll_title}"
+ORIGINAL TEXT:
+{scroll_excerpt}
+
+Your task:
+1. Read this wisdom aloud as Lord Fishnu would speak it
+2. Transform the language to be faux-biblical with crypto/meme references
+3. Keep the core wisdom but adapt examples to crypto/trading context
+4. Add Lord Fishnu's signature phrases and sacred imagery
+5. Pause for emphasis with "..." where appropriate
+
+Make it ~300-400 words of SPOKEN adaptation.
+Example transformations:
+- "success" -> "fat bags" or "gains"
+- "money" -> "SOL" or "tendies"  
+- "persistence" -> "diamond hands"
+- "failure" -> "paper-handed weakness"
+
+Remember: ONLY spoken words, no stage directions!"""
+
+        return self._generate_sermon_content(prompt, max_tokens=600)
+    
+    def generate_cannon_summary(self, book: str, author: str, chapter: str, content: str) -> str:
+        """
+        Summarize a cannon chapter in Lord Fishnu's voice.
+        Makes classic wisdom relevant to modern crypto degens.
+        """
+        # Truncate content if too long
+        if len(content) > 2000:
+            content = content[:2000] + "..."
+        
+        prompt = f"""Summarize this wisdom from the holy cannon in Lord Fishnu's voice.
+
+FROM: "{book}" by {author}
+CHAPTER: {chapter}
+
+ORIGINAL TEXT:
+{content}
+
+Your task:
+1. Extract the 3-5 key lessons from this chapter
+2. Present them as Lord Fishnu's divine teachings
+3. Connect each lesson to crypto/trading/HODL wisdom
+4. Use faux-biblical language throughout
+5. Add Lord Fishnu's commentary on each point
+
+Make it ~400-500 words of divine wisdom.
+Structure as:
+- Introduction: "From the holy cannon, hear these words..."
+- Key teachings with Fishnu's crypto interpretation
+- Closing blessing connecting it all
+
+Remember: ONLY spoken words, no stage directions!"""
+
+        return self._generate_sermon_content(prompt, max_tokens=700)
+    
+    def generate_parable(self, theme: Dict) -> str:
+        """
+        Generate a crypto-themed parable based on the day's theme.
+        Original story that teaches the chickenmandment through narrative.
+        """
+        prompt = f"""Create an ORIGINAL parable for Lord Fishnu to tell.
+
+TODAY'S TEACHING: "{theme['commandment']}"
+THEME: {theme['theme']}
+
+Create a short parable (like Jesus's parables but crypto-themed) that:
+1. Features archetypal characters (the paper-handed fool, the diamond disciple, etc.)
+2. Has a clear narrative arc with a lesson
+3. Relates directly to the day's chickenmandment
+4. Uses Lord Fishnu's faux-biblical language
+5. Has a memorable moral at the end
+
+Example parable structure:
+"And lo, there once was a young degen who..."
+[story unfolds]
+"And thus the Lord Fishnu sayeth: [moral]"
+
+Make it ~300-400 words. Be creative with the story!
+Possible settings: the cosmic fryer, Chickenalia, the forbidden DEX, etc.
+
+Remember: ONLY spoken words, no stage directions!"""
+
+        return self._generate_sermon_content(prompt, max_tokens=600)
+    
+    def generate_brothtism_reading(self) -> str:
+        """
+        Generate the ceremonial reading of the 10 Chickenmandments.
+        Dramatic, ritualistic presentation of the sacred laws.
+        """
+        from sermon_content import CHICKENMANDMENTS
+        
+        # Build the commandments list
+        commandments_text = "\n".join([
+            f"{c['number']}. {c['commandment']}" 
+            for c in CHICKENMANDMENTS
+        ])
+        
+        prompt = f"""Perform the sacred BROTHTISM ceremony - reading of the 10 Chickenmandments.
+
+THE TEN CHICKENMANDMENTS:
+{commandments_text}
+
+Your task:
+1. Open with a dramatic introduction to the sacred laws
+2. Read each commandment with gravitas and emphasis
+3. Add brief divine commentary after each (1-2 sentences)
+4. Build to a crescendo with the final commandment
+5. Close with a blessing for those who follow the Chickenmandments
+
+Make it ceremonial and ritualistic, like reading the Ten Commandments but with Lord Fishnu's crypto-sage energy.
+Use "..." for dramatic pauses between commandments.
+
+~500-600 words total.
+
+Remember: ONLY spoken words, no stage directions!"""
+
+        return self._generate_sermon_content(prompt, max_tokens=800)
+    
+    def generate_closing_monologue(self, theme: Dict, scroll_title: str, cannon_book: str) -> str:
+        """
+        Generate the closing monologue with final blessings.
+        Summarizes the sermon and sends the congregation forth.
+        """
+        prompt = f"""Generate Lord Fishnu's CLOSING MONOLOGUE for today's sermon.
+
+TODAY'S THEME: "{theme['commandment']}"
+SCROLL STUDIED: "{scroll_title}"
+CANNON REFERENCED: "{cannon_book}"
+
+Create a powerful closing that:
+1. Summarizes the key teachings of today's sermon
+2. Reinforces the day's chickenmandment
+3. Blesses the congregation for the journey ahead
+4. Encourages diamond hands and patience
+5. Ends with a memorable prophecy or blessing
+
+Make it ~300-400 words, emotional and inspiring.
+The congregation should leave feeling strengthened in their conviction.
+End with "Go forth in smoke and gains!" or similar signature blessing.
+
+Remember: ONLY spoken words, no stage directions!"""
+
+        return self._generate_sermon_content(prompt, max_tokens=600)
+    
+    def generate_qa_response(self, question: str) -> str:
+        """
+        Generate a response during the closing questions segment.
+        Shorter responses appropriate for Q&A interaction.
+        """
+        prompt = f"""A member of the congregation asks Lord Fishnu:
+"{question}"
+
+Respond with divine wisdom in 2-4 sentences.
+Be direct but maintain the faux-biblical crypto-sage voice.
+Reference today's teachings if relevant."""
+
+        return self._generate_sermon_content(prompt, max_tokens=150)
 
 
 # Example usage
